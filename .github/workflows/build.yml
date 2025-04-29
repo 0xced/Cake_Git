@@ -26,6 +26,16 @@ jobs:
         with:
             global-json-file: 'global.json'
 
+      - name: Install go
+        if: runner.os != 'macOS'
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.23
+
+      - name: Install lipo
+        if: runner.os != 'macOS'
+        run: go install github.com/konoui/lipo@latest
+
       - name: Run Cake script
         uses: cake-build/cake-action@v2
         env:

@@ -223,9 +223,22 @@ Task("Create-NuGet-Package-Scripting")
     var libGit = context.GetFiles(data.BuildPaths.ArtifactsRoot.FullPath + "/**/LibGit2Sharp*");
     var unmanaged = context.GetFiles(data.BuildPaths.ArtifactsRoot.FullPath + "/net8.0/runtimes/**/*");
 
+    // merge multiple macOS architectures in a single (fat) binary
+    var osxUnmanaged = unmanaged.Where(file => file.FullPath.Contains("/osx-")).GroupBy(file => file.GetFilename()).Single();
+    var fatDylibPath = data.BuildPaths.ArtifactsRoot.FullPath + "/" + osxUnmanaged.Key.FullPath;
+    var arguments = new ProcessArgumentBuilder();
+    foreach (var filePath in osxUnmanaged)
+    {
+        arguments.AppendQuoted(filePath.FullPath);
+    }
+    arguments.Append("-create");
+    arguments.Append("-output");
+    arguments.AppendQuoted(fatDylibPath);
+    context.StartProcess("lipo", new ProcessSettings { Arguments = arguments });
+
     data.NuGetPackSettings.Description += Environment.NewLine + Environment.NewLine + 
                                           "NOTE:" + Environment.NewLine + 
-                                          "The addin currently only runs on x64 processors. ARM processors are not supported." + Environment.NewLine +
+                                          "The addin currently only runs on x64 processors. ARM processors are not supported on Linux and Windows." + Environment.NewLine +
                                           "This is the version of the addin compatible with Cake Script Runners." + Environment.NewLine +
                                           "For addin compatible with Cake Frosting see Cake.Frosting.Git.";
     data.NuGetPackSettings.Files =  (libGit + cakeGit + cakeGitDoc)
@@ -237,12 +250,17 @@ Task("Create-NuGet-Package-Scripting")
                                         .Select(file=>new NuSpecContent {Source = file, Target = "/" + file.Substring(7)}))
                                     // cake scripting needs the unmanaged dlls to be in the "wrong" place for some reason..
                                     .Union(unmanaged
-                                        .Where(file=>file.FullPath.Contains("/linux-x64/") || file.FullPath.Contains("/win-x64/") || file.FullPath.Contains("/osx-x64/"))
+                                        .Where(file=>file.FullPath.Contains("/linux-x64/") || file.FullPath.Contains("/win-x64/"))
                                         .SelectMany(file => data.TargetFrameworks.Select(tfm =>
                                             new NuSpecContent {
                                                 Source = file.FullPath.Substring(data.BuildPaths.ArtifactsRoot.FullPath.Length+1),
                                                 Target = $"lib/{tfm}/{file.GetFilename()}"
                                             })))
+                                    // copy the fat dylib in order to support both Intel-based and Apple silicon Macs
+                                    .Union(data.TargetFrameworks.Select(tfm => new NuSpecContent {
+                                            Source = fatDylibPath.Substring(data.BuildPaths.ArtifactsRoot.FullPath.Length+1),
+                                            Target = $"lib/{tfm}/{osxUnmanaged.Key.FullPath}"
+                                        }))
                                     // add the icon
                                     .Union(new []
                                     {
